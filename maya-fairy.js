@@ -1,5 +1,5 @@
 /* ============================================================
-   MAYA – THE MYSTICAL SITE FAIRY  v3.0
+   MAYA – THE MYSTICAL SITE FAIRY  v4.0
    ============================================================
    Drop this file into your GitHub repo (Prasiddhe/maya-fairy)
    then load via Wix Custom Code:
@@ -7,11 +7,12 @@
 
    Place in: Body – All Pages
 
-   v3 changes:
-   • Slimmer, more delicate fairy body
-   • Approaches to greet after 3s page dwell (no scroll needed)
-   • Click on fairy → full-screen magical ripple burst
-   • No cursor-fleeing behaviour
+   v4 changes:
+   • Maya lives in PAGE space — she scrolls with the website,
+     wanders the full document height, not just the viewport.
+   • No cursor-fleeing behaviour whatsoever.
+   • Canvas + hit element follow scroll offset in real time.
+   • All other v3 features preserved.
    ============================================================ */
 
 (function () {
@@ -32,13 +33,27 @@
     "I wonder what's beyond this page…", "✨ sparkle sparkle ✨", "*hums softly*"
   ];
 
-  /* ── STATE ──────────────────────────────────────────────── */
+  /* ── HELPERS: page dimensions & scroll ─────────────────── */
+  function pageW()      { return Math.max(document.body.scrollWidth,  document.documentElement.scrollWidth,  window.innerWidth);  }
+  function pageH()      { return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, window.innerHeight); }
+  function scrollX()    { return window.scrollX || window.pageXOffset || 0; }
+  function scrollY()    { return window.scrollY || window.pageYOffset || 0; }
+  // Convert page-space coords → viewport coords (for bubble & hit element)
+  function toViewX(px)  { return px - scrollX(); }
+  function toViewY(py)  { return py - scrollY(); }
+  // Convert page-space coords → canvas-local coords
+  // (canvas is positioned at scrollX, scrollY via its CSS, see below)
+  function toCanvasX(px){ return px - scrollX(); }
+  function toCanvasY(py){ return py - scrollY(); }
+
+  /* ── STATE (coordinates are in PAGE space) ──────────────── */
   const state = {
-    x: window.innerWidth * 0.82,
-    y: window.innerHeight * 0.25,
+    // Start near top-right of page
+    x: window.innerWidth * 0.82 + scrollX(),
+    y: window.innerHeight * 0.25 + scrollY(),
     vx: 0, vy: 0,
-    targetX: window.innerWidth * 0.82,
-    targetY: window.innerHeight * 0.25,
+    targetX: window.innerWidth * 0.82 + scrollX(),
+    targetY: window.innerHeight * 0.25 + scrollY(),
     phase: 'wandering',
     trailPoints: [],
     lastSection: null,
@@ -55,6 +70,8 @@
   };
 
   /* ── CREATE CANVAS ──────────────────────────────────────── */
+  // Canvas stays viewport-sized but we translate its context by -scrollOffset
+  // so page-space coordinates draw correctly.
   const canvas = document.createElement('canvas');
   canvas.id = 'maya-fairy-canvas';
   canvas.style.cssText = `
@@ -73,8 +90,7 @@
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
 
-  /* ── HIT TEST CANVAS ELEMENT ──────────────────────────── */
-  // We need a tiny transparent click-capturing element over the fairy
+  /* ── HIT TEST ELEMENT (viewport space, tracks fairy) ───── */
   const hitEl = document.createElement('div');
   hitEl.style.cssText = `
     position:fixed;width:70px;height:70px;
@@ -85,7 +101,7 @@
   `;
   document.body.appendChild(hitEl);
 
-  /* ── CHAT BUBBLE ────────────────────────────────────────── */
+  /* ── CHAT BUBBLE (viewport space) ──────────────────────── */
   const bubble = document.createElement('div');
   bubble.style.cssText = `
     position:fixed;
@@ -105,15 +121,18 @@
   `;
   document.body.appendChild(bubble);
 
-  function showBubble(text, x, y) {
+  function showBubble(text) {
     bubble.textContent = text;
-    const bx = Math.min(x + 22, window.innerWidth - 240);
-    const by = Math.max(y - 65, 10);
-    bubble.style.left  = bx + 'px';
-    bubble.style.top   = by + 'px';
+    updateBubblePos();
     bubble.style.opacity   = '1';
     bubble.style.transform = 'scale(1) translateY(0)';
     state.chatVisible = true;
+  }
+  function updateBubblePos() {
+    const vx = toViewX(state.x);
+    const vy = toViewY(state.y);
+    bubble.style.left = Math.min(vx + 22, window.innerWidth - 240) + 'px';
+    bubble.style.top  = Math.max(vy - 65, 10) + 'px';
   }
   function hideBubble(delay) {
     setTimeout(() => {
@@ -139,8 +158,9 @@
   }
 
   /* ── MAGIC RIPPLE (on click) ────────────────────────────── */
-  function triggerMagicRipple(cx, cy) {
-    // Multiple expanding rings + star bursts
+  function triggerMagicRipple() {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
     const colors = ['rgba(220,170,255,', 'rgba(255,200,240,', 'rgba(180,130,255,', 'rgba(255,230,255,'];
     for (let i = 0; i < 5; i++) {
       state.ripples.push({
@@ -153,7 +173,6 @@
         delay: i * 80
       });
     }
-    // Burst of sparkle dust from fairy
     for (let i = 0; i < 40; i++) {
       const angle = (Math.PI * 2 * i) / 40;
       const speed = 3 + Math.random() * 5;
@@ -166,22 +185,18 @@
         color: `hsl(${270 + Math.random() * 80},90%,75%)`
       });
     }
-    // Show a cute reaction
     state.emotion = 'excited';
-    showBubble('Eee~! You found me! ✨💜', state.x, state.y);
+    showBubble('Eee~! You found me! ✨💜');
     hideBubble(2500);
   }
 
   function drawRipples() {
-    const now = Date.now();
     state.ripples = state.ripples.filter(rip => rip.life > 0);
     state.ripples.forEach(rip => {
       if (rip.delay > 0) { rip.delay -= 16; return; }
       rip.r += rip.speed;
       rip.life = 1 - rip.r / rip.maxR;
       if (rip.life < 0) { rip.life = 0; return; }
-
-      // Outer ring
       ctx.save();
       ctx.globalAlpha = rip.life * 0.35;
       ctx.strokeStyle = rip.color + '1)';
@@ -189,8 +204,6 @@
       ctx.beginPath();
       ctx.arc(rip.x, rip.y, rip.r, 0, Math.PI * 2);
       ctx.stroke();
-
-      // Soft fill glow near centre
       if (rip.r < rip.maxR * 0.35) {
         const grad = ctx.createRadialGradient(rip.x, rip.y, 0, rip.x, rip.y, rip.r);
         grad.addColorStop(0, rip.color + (rip.life * 0.12) + ')');
@@ -200,14 +213,10 @@
         ctx.arc(rip.x, rip.y, rip.r, 0, Math.PI * 2);
         ctx.fill();
       }
-
-      // Scattered stars along the ring edge
       const numStars = 8;
       for (let i = 0; i < numStars; i++) {
         const a = (Math.PI * 2 * i) / numStars + rip.r * 0.01;
-        const sx = rip.x + Math.cos(a) * rip.r;
-        const sy = rip.y + Math.sin(a) * rip.r;
-        drawStar(ctx, sx, sy, 3, rip.life * 0.7, '#f5d0ff');
+        drawStar(ctx, rip.x + Math.cos(a) * rip.r, rip.y + Math.sin(a) * rip.r, 3, rip.life * 0.7, '#f5d0ff');
       }
       ctx.restore();
     });
@@ -230,34 +239,31 @@
     ctx.restore();
   }
 
-  /* ── DRAW FAIRY (slim & delicate) ──────────────────────── */
-  function drawFairy(x, y, t) {
-    const bob    = Math.sin(t * 0.04) * 3.5;
-    const bobY   = y + bob;
-    const wing   = Math.sin(t * 0.28) * 0.45;
-    const glow   = 0.5 + 0.5 * Math.sin(t * 0.03);
+  /* ── DRAW FAIRY ─────────────────────────────────────────── */
+  // cx/cy are CANVAS (viewport) coords — already offset from page coords
+  function drawFairy(cx, cy, t) {
+    const bob  = Math.sin(t * 0.04) * 3.5;
+    const bobY = cy + bob;
+    const wing = Math.sin(t * 0.28) * 0.45;
+    const glow = 0.5 + 0.5 * Math.sin(t * 0.03);
     const isSleeping = state.phase === 'sleeping';
     const isExcited  = state.emotion === 'excited';
 
     ctx.save();
 
-    /* outer aura */
-    const aura = ctx.createRadialGradient(x, bobY, 0, x, bobY, 52);
+    const aura = ctx.createRadialGradient(cx, bobY, 0, cx, bobY, 52);
     aura.addColorStop(0, `rgba(220,170,255,${0.16 * glow})`);
     aura.addColorStop(0.5, `rgba(180,120,255,${0.07 * glow})`);
     aura.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = aura;
     ctx.beginPath();
-    ctx.ellipse(x, bobY, 52, 52, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, bobY, 52, 52, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    /* ── WINGS ── */
     ctx.save();
-    ctx.translate(x, bobY - 4);
-
+    ctx.translate(cx, bobY - 4);
     const flapMult = isExcited ? 2.2 : 1;
 
-    // upper-left
     ctx.save();
     ctx.rotate(-0.25 + wing * flapMult);
     ctx.beginPath();
@@ -267,14 +273,10 @@
     const wg1 = ctx.createLinearGradient(-42, -18, 0, 10);
     wg1.addColorStop(0, `rgba(230,200,255,${0.6 + 0.15*glow})`);
     wg1.addColorStop(1, `rgba(200,160,255,0.18)`);
-    ctx.fillStyle = wg1;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(190,150,255,0.28)';
-    ctx.lineWidth = 0.6;
-    ctx.stroke();
+    ctx.fillStyle = wg1; ctx.fill();
+    ctx.strokeStyle = 'rgba(190,150,255,0.28)'; ctx.lineWidth = 0.6; ctx.stroke();
     ctx.restore();
 
-    // upper-right (mirror)
     ctx.save();
     ctx.rotate(0.25 - wing * flapMult);
     ctx.scale(-1, 1);
@@ -285,25 +287,19 @@
     const wg2 = ctx.createLinearGradient(-42, -18, 0, 10);
     wg2.addColorStop(0, `rgba(230,200,255,${0.6 + 0.15*glow})`);
     wg2.addColorStop(1, `rgba(200,160,255,0.18)`);
-    ctx.fillStyle = wg2;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(190,150,255,0.28)';
-    ctx.lineWidth = 0.6;
-    ctx.stroke();
+    ctx.fillStyle = wg2; ctx.fill();
+    ctx.strokeStyle = 'rgba(190,150,255,0.28)'; ctx.lineWidth = 0.6; ctx.stroke();
     ctx.restore();
 
-    // lower-left (small)
     ctx.save();
     ctx.rotate(-0.08 + wing * 0.5);
     ctx.beginPath();
     ctx.moveTo(0, 2);
     ctx.bezierCurveTo(-14, 2, -24, 18, -13, 24);
     ctx.bezierCurveTo(-5, 27, -1, 16, 0, 2);
-    ctx.fillStyle = `rgba(215,180,255,${0.32 + 0.08*glow})`;
-    ctx.fill();
+    ctx.fillStyle = `rgba(215,180,255,${0.32 + 0.08*glow})`; ctx.fill();
     ctx.restore();
 
-    // lower-right
     ctx.save();
     ctx.rotate(0.08 - wing * 0.5);
     ctx.scale(-1, 1);
@@ -311,77 +307,45 @@
     ctx.moveTo(0, 2);
     ctx.bezierCurveTo(-14, 2, -24, 18, -13, 24);
     ctx.bezierCurveTo(-5, 27, -1, 16, 0, 2);
-    ctx.fillStyle = `rgba(215,180,255,${0.32 + 0.08*glow})`;
-    ctx.fill();
+    ctx.fillStyle = `rgba(215,180,255,${0.32 + 0.08*glow})`; ctx.fill();
+    ctx.restore();
     ctx.restore();
 
-    ctx.restore(); // end wings
-
-    /* ── BODY (slim) ── */
     ctx.save();
-    ctx.translate(x, bobY);
+    ctx.translate(cx, bobY);
 
-    // torso — slender oval
     const bodyGrad = ctx.createLinearGradient(0, -12, 0, 14);
     bodyGrad.addColorStop(0, '#efd0ff');
     bodyGrad.addColorStop(0.5, '#d8a8ff');
     bodyGrad.addColorStop(1, '#c080ff');
     ctx.fillStyle = bodyGrad;
-    ctx.beginPath();
-    ctx.ellipse(0, 2, 4.5, 9, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 2, 4.5, 9, 0, 0, Math.PI * 2); ctx.fill();
 
-    // waist cinch
     ctx.fillStyle = 'rgba(180,100,255,0.35)';
-    ctx.beginPath();
-    ctx.ellipse(0, 4, 3, 2.5, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 4, 3, 2.5, 0, 0, Math.PI * 2); ctx.fill();
 
-    // skirt flare — wider at bottom, slim at waist
     ctx.beginPath();
     ctx.moveTo(-4.5, 7);
     ctx.bezierCurveTo(-10, 13, -9, 20, 0, 21);
     ctx.bezierCurveTo(9, 20, 10, 13, 4.5, 7);
     ctx.closePath();
-    ctx.fillStyle = `rgba(200,145,255,0.82)`;
-    ctx.fill();
-    // skirt highlight
+    ctx.fillStyle = `rgba(200,145,255,0.82)`; ctx.fill();
     ctx.fillStyle = 'rgba(240,210,255,0.35)';
-    ctx.beginPath();
-    ctx.ellipse(-1.5, 13, 2, 4, -0.3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // dress sparkle
+    ctx.beginPath(); ctx.ellipse(-1.5, 13, 2, 4, -0.3, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.beginPath(); ctx.arc(0.5, 1, 1, 0, Math.PI * 2); ctx.fill();
 
-    /* ── TINY ARMS ── */
-    ctx.strokeStyle = '#f0c8ff';
-    ctx.lineWidth = 1.5;
-    ctx.lineCap = 'round';
-    // left arm
-    ctx.beginPath();
-    ctx.moveTo(-4, 0);
-    ctx.bezierCurveTo(-9, -2, -11, 3, -10, 7);
-    ctx.stroke();
-    // right arm
-    ctx.beginPath();
-    ctx.moveTo(4, 0);
-    ctx.bezierCurveTo(9, -2, 11, 3, 10, 7);
-    ctx.stroke();
+    ctx.strokeStyle = '#f0c8ff'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-4, 0); ctx.bezierCurveTo(-9, -2, -11, 3, -10, 7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(4, 0);  ctx.bezierCurveTo(9, -2, 11, 3, 10, 7);  ctx.stroke();
 
-    /* ── HEAD ── */
     ctx.fillStyle = '#fce8de';
-    ctx.beginPath();
-    ctx.ellipse(0, -15, 6.5, 7, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, -15, 6.5, 7, 0, 0, Math.PI * 2); ctx.fill();
 
-    // cheeks
     ctx.fillStyle = 'rgba(255,165,165,0.42)';
     ctx.beginPath(); ctx.ellipse(-3.8, -12.5, 2.3, 1.4, 0, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.ellipse( 3.8, -12.5, 2.3, 1.4, 0, 0, Math.PI * 2); ctx.fill();
 
-    // EYES
     if (!isSleeping) {
       if (state.isBlinking) {
         ctx.strokeStyle = '#5a2d82'; ctx.lineWidth = 1.2;
@@ -401,37 +365,28 @@
       ctx.beginPath(); ctx.arc( 2.2, -15.5, 1.8, Math.PI, 0); ctx.stroke();
     }
 
-    // smile
     ctx.strokeStyle = '#c47ab8'; ctx.lineWidth = 1;
     ctx.beginPath();
-    if (isSleeping) {
-      ctx.arc(0, -11.5, 1.8, 0.2, Math.PI - 0.2);
-    } else if (isExcited) {
-      ctx.arc(0, -11.5, 2.4, 0.1, Math.PI - 0.1);
-    } else {
-      ctx.arc(0, -11.5, 2, 0.2, Math.PI - 0.2);
-    }
+    if (isSleeping)       ctx.arc(0, -11.5, 1.8, 0.2, Math.PI - 0.2);
+    else if (isExcited)   ctx.arc(0, -11.5, 2.4, 0.1, Math.PI - 0.1);
+    else                  ctx.arc(0, -11.5, 2, 0.2, Math.PI - 0.2);
     ctx.stroke();
 
-    /* ── HAIR ── */
     ctx.fillStyle = '#c070ff';
     ctx.beginPath(); ctx.ellipse(-4.8, -19, 3.8, 5, -0.5, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.ellipse( 4.8, -19, 3.8, 5, 0.5, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.ellipse(0, -22, 3.2, 4.2, 0, 0, Math.PI * 2); ctx.fill();
-    // hair wisp
     ctx.strokeStyle = '#d090ff'; ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.moveTo(-5, -22);
     ctx.bezierCurveTo(-8, -27, -4, -30, -2, -27);
     ctx.stroke();
 
-    /* ── WAND ── */
     if (!isSleeping) {
       ctx.save();
       ctx.rotate(0.28 + Math.sin(t * 0.05) * 0.12);
       ctx.strokeStyle = '#e0b8ff'; ctx.lineWidth = 1.1;
       ctx.beginPath(); ctx.moveTo(5, -9); ctx.lineTo(16, -21); ctx.stroke();
-      // star tip
       const sx = 16, sy = -21, sr = 3;
       ctx.fillStyle = `rgba(255,242,120,${0.72 + 0.28 * glow})`;
       ctx.beginPath();
@@ -451,52 +406,54 @@
       ctx.restore();
     }
 
-    ctx.restore(); // end body
+    ctx.restore();
 
-    /* ── SLEEP CLOUD ── */
     if (isSleeping) {
-      const bg = ctx.createRadialGradient(x, bobY + 14, 0, x, bobY + 14, 38);
+      const bg = ctx.createRadialGradient(cx, bobY + 14, 0, cx, bobY + 14, 38);
       bg.addColorStop(0, `rgba(200,150,255,${0.13 * glow})`);
       bg.addColorStop(1, 'transparent');
       ctx.fillStyle = bg;
-      ctx.beginPath(); ctx.ellipse(x, bobY + 14, 38, 16, 0, 0, Math.PI * 2); ctx.fill();
-
+      ctx.beginPath(); ctx.ellipse(cx, bobY + 14, 38, 16, 0, 0, Math.PI * 2); ctx.fill();
       const za = 0.5 + 0.5 * Math.sin(t * 0.06);
       ctx.fillStyle = `rgba(180,130,255,${0.65 * za})`;
       ctx.font = `bold ${10 + za * 3}px Georgia`;
-      ctx.fillText('z', x + 16, bobY - 26 - za * 5);
+      ctx.fillText('z', cx + 16, bobY - 26 - za * 5);
       ctx.font = `bold ${7 + za * 2}px Georgia`;
-      ctx.fillText('z', x + 24, bobY - 34 - za * 3);
+      ctx.fillText('z', cx + 24, bobY - 34 - za * 3);
     }
   }
 
-  /* ── DRAW TRAIL ─────────────────────────────────────────── */
+  /* ── DRAW TRAIL (in canvas/viewport coords) ─────────────── */
   function drawTrail() {
     state.trailPoints.forEach(p => {
+      const cx = toCanvasX(p.x);
+      const cy = toCanvasY(p.y);
       ctx.globalAlpha = p.life * 0.38;
       ctx.fillStyle = 'rgba(210,170,255,1)';
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.arc(cx, cy, p.size * p.life, 0, Math.PI * 2);
       ctx.fill();
     });
     ctx.globalAlpha = 1;
   }
 
-  /* ── DRAW DUST ──────────────────────────────────────────── */
+  /* ── DRAW DUST (in canvas/viewport coords) ──────────────── */
   function drawDust() {
     state.dustParticles.forEach(d => {
+      const cx = toCanvasX(d.x);
+      const cy = toCanvasY(d.y);
       ctx.globalAlpha = d.life * 0.82;
       ctx.fillStyle = d.color;
       ctx.beginPath();
-      ctx.arc(d.x, d.y, d.size * d.life, 0, Math.PI * 2);
+      ctx.arc(cx, cy, d.size * d.life, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = d.color;
       ctx.lineWidth = 0.5;
       ctx.beginPath();
-      ctx.moveTo(d.x - d.size * 1.4, d.y);
-      ctx.lineTo(d.x + d.size * 1.4, d.y);
-      ctx.moveTo(d.x, d.y - d.size * 1.4);
-      ctx.lineTo(d.x, d.y + d.size * 1.4);
+      ctx.moveTo(cx - d.size * 1.4, cy);
+      ctx.lineTo(cx + d.size * 1.4, cy);
+      ctx.moveTo(cx, cy - d.size * 1.4);
+      ctx.lineTo(cx, cy + d.size * 1.4);
       ctx.stroke();
     });
     ctx.globalAlpha = 1;
@@ -511,17 +468,16 @@
       '[id*="portfolio"]','[id*="hero"]',
       '.hero','.about','.services','.portfolio','.contact'
     ].join(','));
-
     let foundKey = 'default';
     els.forEach(el => {
       const r = el.getBoundingClientRect();
       if (r.top <= midY && r.bottom >= midY) {
         const id = (el.id + ' ' + el.className).toLowerCase();
         if      (id.includes('hero') || id.includes('banner') || id.includes('intro')) foundKey = 'hero';
-        else if (id.includes('about'))     foundKey = 'about';
-        else if (id.includes('service'))   foundKey = 'services';
+        else if (id.includes('about'))    foundKey = 'about';
+        else if (id.includes('service'))  foundKey = 'services';
         else if (id.includes('portfolio') || id.includes('work') || id.includes('project')) foundKey = 'portfolio';
-        else if (id.includes('contact'))   foundKey = 'contact';
+        else if (id.includes('contact'))  foundKey = 'contact';
         else foundKey = 'default';
       }
     });
@@ -530,14 +486,14 @@
 
   function pickMsg(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-  /* ── MOVEMENT ───────────────────────────────────────────── */
+  /* ── MOVEMENT (all in PAGE space) ──────────────────────── */
   function moveToTarget() {
     const dx   = state.targetX - state.x;
     const dy   = state.targetY - state.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 2) return;
 
-    const speed  = state.phase === 'approaching' ? 0.045 : 0.02;
+    const speed    = state.phase === 'approaching' ? 0.045 : 0.02;
     state.vx += dx * speed;
     state.vy += dy * speed;
     state.vx *= 0.80;
@@ -549,53 +505,61 @@
 
     state.x += state.vx;
     state.y += state.vy;
-    state.x = Math.max(35, Math.min(canvas.width - 35, state.x));
-    state.y = Math.max(50, Math.min(canvas.height - 50, state.y));
+
+    // Clamp to full page bounds
+    const margin = 50;
+    state.x = Math.max(margin, Math.min(pageW() - margin, state.x));
+    state.y = Math.max(margin, Math.min(pageH() - margin, state.y));
   }
 
   let wanderTimer = 0;
   function doWander() {
     wanderTimer--;
     if (wanderTimer <= 0) {
-      const m = 90;
-      state.targetX = m + Math.random() * (canvas.width - m * 2);
-      state.targetY = m + Math.random() * (canvas.height - m * 2);
+      // Pick a random spot anywhere on the FULL page
+      const m = 80;
+      state.targetX = m + Math.random() * (pageW() - m * 2);
+      state.targetY = m + Math.random() * (pageH() - m * 2);
       wanderTimer = 200 + Math.random() * 260;
     }
     moveToTarget();
   }
 
-  /* ── PAGE DWELL APPROACH (fires after 3s on page, not scroll) ─ */
+  /* ── APPROACH ───────────────────────────────────────────── */
   function startApproach(sectionKey) {
     if (state.phase === 'talking' || state.phase === 'approaching') return;
-    state.phase = 'approaching';
+    state.phase   = 'approaching';
     state.emotion = 'excited';
 
-    const tx = canvas.width * 0.5 + (Math.random() - 0.5) * 80;
-    const ty = canvas.height * 0.42 + (Math.random() - 0.5) * 60;
+    // Approach somewhere visible in the current viewport (page coords)
+    const tx = scrollX() + window.innerWidth  * 0.5 + (Math.random() - 0.5) * 80;
+    const ty = scrollY() + window.innerHeight * 0.42 + (Math.random() - 0.5) * 60;
     state.targetX = tx;
     state.targetY = ty;
 
     setTimeout(() => {
       if (state.phase !== 'approaching') return;
-      state.phase = 'talking';
+      state.phase   = 'talking';
       state.emotion = 'happy';
       const msg = pickMsg(SECTION_MESSAGES[sectionKey] || SECTION_MESSAGES.default);
-      showBubble(msg, state.x, state.y);
+      showBubble(msg);
       spawnDust(state.x, state.y, '#e0b0ff', 8);
 
       hideBubble(4500);
       setTimeout(() => {
         state.phase = 'leaving';
+        // Leave to a corner of the FULL page, not necessarily visible
         const corners = [
-          [canvas.width - 65, 65], [65, 65],
-          [canvas.width - 65, canvas.height - 65], [65, canvas.height - 65]
+          [pageW() - 65, scrollY() + 65],
+          [65,            scrollY() + 65],
+          [pageW() - 65, scrollY() + window.innerHeight - 65],
+          [65,            scrollY() + window.innerHeight - 65]
         ];
-        const [cx, cy] = corners[Math.floor(Math.random() * corners.length)];
-        state.targetX = cx;
-        state.targetY = cy;
+        const [cx2, cy2] = corners[Math.floor(Math.random() * corners.length)];
+        state.targetX = cx2;
+        state.targetY = cy2;
         setTimeout(() => {
-          state.phase = 'wandering';
+          state.phase   = 'wandering';
           state.emotion = 'happy';
           scheduleSleep();
         }, 3000);
@@ -604,17 +568,14 @@
   }
 
   /* ── DWELL CHECK ────────────────────────────────────────── */
-  // Triggers 3 seconds after page is loaded / user is here
   let dwellFired = false;
   setTimeout(() => {
     if (!dwellFired) {
       dwellFired = true;
-      const key = detectSection();
-      startApproach(key);
+      startApproach(detectSection());
     }
   }, 3000);
 
-  // Also re-trigger after scrolling and staying in a new section for 3s
   let sectionChangeTimer = null;
   let lastSectionKey = null;
   function checkSectionDwell() {
@@ -623,10 +584,7 @@
       lastSectionKey = key;
       clearTimeout(sectionChangeTimer);
       sectionChangeTimer = setTimeout(() => {
-        if (state.phase === 'sleeping') {
-          state.phase = 'wandering';
-          state.emotion = 'happy';
-        }
+        if (state.phase === 'sleeping') { state.phase = 'wandering'; state.emotion = 'happy'; }
         if (state.phase === 'wandering') startApproach(key);
       }, 3000);
     }
@@ -653,7 +611,7 @@
     clearTimeout(state.idleTimer);
     state.idleTimer = setTimeout(() => {
       if (state.phase === 'wandering' && !state.chatVisible) {
-        showBubble(pickMsg(IDLE_THOUGHTS), state.x, state.y);
+        showBubble(pickMsg(IDLE_THOUGHTS));
         hideBubble(2500);
       }
       scheduleIdleThought();
@@ -673,13 +631,11 @@
   }
   scheduleBlink();
 
-  /* ── CLICK ON FAIRY → MAGIC RIPPLE ─────────────────────── */
+  /* ── CLICK → MAGIC RIPPLE ───────────────────────────────── */
   hitEl.addEventListener('click', () => {
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    triggerMagicRipple(cx, cy);
+    triggerMagicRipple();
     if (state.phase === 'sleeping') {
-      state.phase = 'wandering';
+      state.phase   = 'wandering';
       state.emotion = 'happy';
       scheduleSleep();
     }
@@ -688,23 +644,20 @@
   /* ── WAKE ON SCROLL / CLICK ─────────────────────────────── */
   function wakeUp() {
     if (state.phase === 'sleeping') {
-      state.phase = 'wandering';
+      state.phase   = 'wandering';
       state.emotion = 'happy';
       clearTimeout(state.sleepTimer);
       scheduleSleep();
     }
   }
   window.addEventListener('scroll', wakeUp, { passive: true });
-  document.addEventListener('click', e => {
-    // wake up regardless of where clicked
-    wakeUp();
-  });
+  document.addEventListener('click', wakeUp);
 
-  /* ── INITIAL GREETING (1.5s) ────────────────────────────── */
+  /* ── INITIAL GREETING ───────────────────────────────────── */
   setTimeout(() => {
     if (!state.hasGreeted) {
       state.hasGreeted = true;
-      showBubble("Psst! I'm Maya~ Click me for magic! ✨", state.x, state.y);
+      showBubble("Psst! I'm Maya~ Click me for magic! ✨");
       hideBubble(3800);
     }
   }, 1500);
@@ -715,7 +668,7 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     t++;
 
-    // trail spawn
+    // Trail spawn (page coords stored, drawn as viewport)
     if (state.phase !== 'sleeping') {
       const sp = Math.sqrt(state.vx * state.vx + state.vy * state.vy);
       if (sp > 0.6) {
@@ -727,12 +680,18 @@
       }
     }
 
-    // age trail & dust
-    state.trailPoints = state.trailPoints.map(p => ({ ...p, life: p.life - 0.03 })).filter(p => p.life > 0);
-    state.dustParticles = state.dustParticles.map(d => ({ ...d, x: d.x + d.vx, y: d.y + d.vy, vy: d.vy - 0.05, life: d.life - 0.022 })).filter(d => d.life > 0);
+    // Age trail & dust
+    state.trailPoints    = state.trailPoints.map(p => ({ ...p, life: p.life - 0.03 })).filter(p => p.life > 0);
+    state.dustParticles  = state.dustParticles.map(d => ({
+      ...d,
+      x: d.x + d.vx,
+      y: d.y + d.vy,
+      vy: d.vy - 0.05,
+      life: d.life - 0.022
+    })).filter(d => d.life > 0);
 
-    // movement
-    if      (state.phase === 'wandering')  doWander();
+    // Movement (page space)
+    if      (state.phase === 'wandering')   doWander();
     else if (state.phase === 'approaching') moveToTarget();
     else if (state.phase === 'leaving')     moveToTarget();
     else if (state.phase === 'sleeping') {
@@ -743,21 +702,22 @@
       state.y += Math.cos(t * 0.025) * 0.25;
     }
 
-    // update hit element position
-    hitEl.style.left = state.x + 'px';
-    hitEl.style.top  = state.y + 'px';
+    // Convert fairy's page coords → viewport coords for hit el & bubble
+    const vx = toViewX(state.x);
+    const vy = toViewY(state.y);
 
-    // update bubble position
-    if (state.chatVisible) {
-      bubble.style.left = Math.min(state.x + 22, window.innerWidth - 240) + 'px';
-      bubble.style.top  = Math.max(state.y - 65, 10) + 'px';
-    }
+    // Update hit element position (viewport)
+    hitEl.style.left = vx + 'px';
+    hitEl.style.top  = vy + 'px';
 
-    // draw layers
+    // Update bubble position
+    if (state.chatVisible) updateBubblePos();
+
+    // Draw (translate page → canvas/viewport space inside draw calls)
     drawRipples();
     drawTrail();
     drawDust();
-    drawFairy(state.x, state.y, t);
+    drawFairy(vx, vy, t);
 
     requestAnimationFrame(loop);
   }
