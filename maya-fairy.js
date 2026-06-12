@@ -1,727 +1,543 @@
 /* ============================================================
-   MAYA – THE MYSTICAL SITE FAIRY  v4.0
+   MAYA — THE LIVING SITE FAIRY  v5.0  (full rewrite)
    ============================================================
-   Drop this file into your GitHub repo (Prasiddhe/maya-fairy)
-   then load via Wix Custom Code:
+   Upload to GitHub (Prasiddhe/maya-fairy) then load in Wix:
    <script src="https://cdn.jsdelivr.net/gh/Prasiddhe/maya-fairy@main/maya-fairy.js"></script>
-
    Place in: Body – All Pages
 
-   v4 changes:
-   • Maya lives in PAGE space — she scrolls with the website,
-     wanders the full document height, not just the viewport.
-   • No cursor-fleeing behaviour whatsoever.
-   • Canvas + hit element follow scroll offset in real time.
-   • All other v3 features preserved.
+   What's new in v5:
+   • Real behavior brain: drift → hover → dart → perch → nap,
+     chosen with weighted randomness. No two visits feel the same.
+   • She notices YOU: if you stay still on a part of the page for
+     a few seconds, she flies into view, says one thing about that
+     section, stays 4–6s, then leaves on her own.
+   • Smaller, slimmer, cuter fairy (~30% smaller, softer face).
+   • Click her → one big magic ripple. That's it.
+   • Message bubble only above her head. No other UI.
+   • Cooldowns so she never spams you.
    ============================================================ */
 
 (function () {
   'use strict';
+  if (window.__mayaFairyLoaded) return;
+  window.__mayaFairyLoaded = true;
 
-  /* ── SECTION MESSAGES ──────────────────────────────────── */
-  const SECTION_MESSAGES = {
-    hero:      ["Psst… welcome ✨ I've been waiting~", "Oh! A visitor! Hello hello hello~", "You found me! I'm Maya… your little guide 🌟"],
-    about:     ["So you want to know more? Hehe~ curious one!", "This is my favourite part… the story ✨", "I love this section~ it has such warm energy 🌸"],
-    services:  ["Ooh, looking at what we do? Good choice~", "These are some of my favourite things! ✨", "Pick something… I'll cheer you on! 🌟"],
-    portfolio: ["Pretty things! I helped make some of these~", "Wooow so much creativity here! 🌸", "I get so proud when people look at this part ✨"],
-    contact:   ["Oh! Are you going to say hello? Please do~", "Don't be shy! I'm not… well, sometimes I am 🙈", "Go on, send a message! I'll deliver it myself~ ✉️✨"],
-    default:   ["Hmm, interesting spot you picked~", "I like it here… it's cozy 🌸", "You're exploring! That makes me happy ✨", "Shhh… I'm resting but I saw you 👀~"]
+  /* ---------- messages ---------- */
+  const MSG = {
+    hero: ["Psst… welcome ✨ I've been waiting~", "Oh! A visitor! Hello hello~", "You found my home page 🌟"],
+    about: ["Curious about us? Hehe, I like curious people~", "This part has the warmest energy 🌸", "Ooh the story page… my favourite ✨"],
+    services: ["Looking at what we do? Good taste~", "Pick something! I'll cheer for you 🌟", "These are some of my favourite things ✨"],
+    portfolio: ["Pretty things! I sprinkled magic on a few~", "Soooo much creativity here 🌸", "I get proud when people stop here ✨"],
+    contact: ["Are you going to say hello? Please do~", "Send a message! I'll deliver it myself ✉️✨", "Don't be shy… okay I'm a little shy too 🙈"],
+    default: ["You've been here a while… cozy, right? 🌸", "Hmm, interesting spot you picked~", "Exploring makes me happy ✨", "I saw you reading… 👀 hehe"]
   };
+  const IDLE = ["la la la~ ♪", "*stretches wings*", "✨", "*hums softly*", "I wonder what's past the footer…", "🌸"];
+  const SLEEPY = ["zZz… 💤", "*yawns*… five more minutes~"];
+  const WAKE = ["*blinks* …oh! I dozed off 🙈", "Mm? I'm awake! I'm awake! ✨"];
+  const CLICK = ["Eee~! Magic! ✨💜", "Hehe that tickles! ✨", "Wheee~! 💫"];
 
-  const IDLE_THOUGHTS = [
-    "zZz… 💤", "*yawns* so peaceful~", "la la la~ ♪", "*stretches wings*",
-    "I wonder what's beyond this page…", "✨ sparkle sparkle ✨", "*hums softly*"
-  ];
+  let lastMsg = '';
+  function pick(arr) {
+    let m = arr[Math.floor(Math.random() * arr.length)];
+    if (arr.length > 1) while (m === lastMsg) m = arr[Math.floor(Math.random() * arr.length)];
+    lastMsg = m;
+    return m;
+  }
+  const rand = (a, b) => a + Math.random() * (b - a);
 
-  /* ── HELPERS: page dimensions & scroll ─────────────────── */
-  function pageW()      { return Math.max(document.body.scrollWidth,  document.documentElement.scrollWidth,  window.innerWidth);  }
-  function pageH()      { return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, window.innerHeight); }
-  function scrollX()    { return window.scrollX || window.pageXOffset || 0; }
-  function scrollY()    { return window.scrollY || window.pageYOffset || 0; }
-  // Convert page-space coords → viewport coords (for bubble & hit element)
-  function toViewX(px)  { return px - scrollX(); }
-  function toViewY(py)  { return py - scrollY(); }
-  // Convert page-space coords → canvas-local coords
-  // (canvas is positioned at scrollX, scrollY via its CSS, see below)
-  function toCanvasX(px){ return px - scrollX(); }
-  function toCanvasY(py){ return py - scrollY(); }
+  /* ---------- page helpers ---------- */
+  const pageW = () => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth, innerWidth);
+  const pageH = () => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, innerHeight);
+  const sX = () => window.scrollX || 0;
+  const sY = () => window.scrollY || 0;
 
-  /* ── STATE (coordinates are in PAGE space) ──────────────── */
-  const state = {
-    // Start near top-right of page
-    x: window.innerWidth * 0.82 + scrollX(),
-    y: window.innerHeight * 0.25 + scrollY(),
+  /* ---------- state (page-space coords) ---------- */
+  const S = {
+    x: sX() + innerWidth * 0.8, y: sY() + innerHeight * 0.3,
     vx: 0, vy: 0,
-    targetX: window.innerWidth * 0.82 + scrollX(),
-    targetY: window.innerHeight * 0.25 + scrollY(),
-    phase: 'wandering',
-    trailPoints: [],
-    lastSection: null,
-    sectionStayTimer: null,
-    hasGreeted: false,
-    sleepTimer: null,
-    idleTimer: null,
-    chatVisible: false,
-    isBlinking: false,
-    emotion: 'happy',
-    dustParticles: [],
-    ripples: [],
-    frame: 0
+    tx: sX() + innerWidth * 0.8, ty: sY() + innerHeight * 0.3,
+    mode: 'drift',          // drift | hover | dart | perch | nap | approach | talk | leave
+    modeTimer: 0,
+    facing: 1,
+    blink: false, blinkT: 0,
+    excited: 0,             // 0..1, decays — wings flap faster
+    trail: [], dust: [], ripples: [],
+    bubbleUntil: 0,
+    lastVisit: 0,           // cooldown between her visits
+    greeted: false
   };
 
-  /* ── CREATE CANVAS ──────────────────────────────────────── */
-  // Canvas stays viewport-sized but we translate its context by -scrollOffset
-  // so page-space coordinates draw correctly.
+  /* ---------- canvas ---------- */
   const canvas = document.createElement('canvas');
-  canvas.id = 'maya-fairy-canvas';
-  canvas.style.cssText = `
-    position:fixed;top:0;left:0;
-    width:100%;height:100%;
-    pointer-events:none;
-    z-index:99998;
-  `;
+  canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:99998;';
   document.body.appendChild(canvas);
   const ctx = canvas.getContext('2d');
+  function resize() { canvas.width = innerWidth; canvas.height = innerHeight; }
+  resize();
+  addEventListener('resize', resize);
 
-  function resizeCanvas() {
-    canvas.width  = window.innerWidth;
-    canvas.height = window.innerHeight;
-  }
-  resizeCanvas();
-  window.addEventListener('resize', resizeCanvas);
+  /* ---------- click target ---------- */
+  const hit = document.createElement('div');
+  hit.style.cssText = 'position:fixed;width:56px;height:56px;border-radius:50%;cursor:pointer;z-index:99999;transform:translate(-50%,-50%);background:transparent;';
+  document.body.appendChild(hit);
 
-  /* ── HIT TEST ELEMENT (viewport space, tracks fairy) ───── */
-  const hitEl = document.createElement('div');
-  hitEl.style.cssText = `
-    position:fixed;width:70px;height:70px;
-    border-radius:50%;cursor:pointer;
-    z-index:99999;pointer-events:auto;
-    transform:translate(-50%,-50%);
-    background:transparent;
-  `;
-  document.body.appendChild(hitEl);
-
-  /* ── CHAT BUBBLE (viewport space) ──────────────────────── */
+  /* ---------- bubble (always above her head) ---------- */
   const bubble = document.createElement('div');
-  bubble.style.cssText = `
-    position:fixed;
-    background:rgba(255,245,255,0.97);
-    border:1.5px solid rgba(200,160,255,0.5);
-    border-radius:18px 18px 18px 4px;
-    padding:10px 16px;
-    font-family:'Georgia',serif;
-    font-size:13px;color:#6a3d8f;
-    max-width:220px;line-height:1.6;
-    box-shadow:0 4px 20px rgba(160,100,255,0.25),0 0 30px rgba(200,160,255,0.15);
-    z-index:99999;pointer-events:none;
-    opacity:0;
-    transform:scale(0.8) translateY(6px);
-    transition:opacity 0.4s ease,transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
-    backdrop-filter:blur(8px);
-  `;
+  bubble.style.cssText = [
+    'position:fixed', 'transform:translate(-50%,-100%) scale(.8)', 'transform-origin:50% 100%',
+    'background:rgba(255,246,255,.97)', 'border:1.5px solid rgba(205,165,255,.5)',
+    'border-radius:16px', 'padding:8px 14px',
+    "font-family:Georgia,serif", 'font-size:12.5px', 'color:#6a3d8f',
+    'max-width:200px', 'line-height:1.5', 'text-align:center',
+    'box-shadow:0 4px 18px rgba(160,100,255,.25)',
+    'z-index:99999', 'pointer-events:none', 'opacity:0',
+    'transition:opacity .35s ease,transform .35s cubic-bezier(.34,1.56,.64,1)',
+    'backdrop-filter:blur(6px)', 'white-space:normal'
+  ].join(';');
   document.body.appendChild(bubble);
+  // little tail under the bubble
+  const tail = document.createElement('div');
+  tail.style.cssText = 'position:absolute;left:50%;bottom:-6px;transform:translateX(-50%) rotate(45deg);width:10px;height:10px;background:rgba(255,246,255,.97);border-right:1.5px solid rgba(205,165,255,.5);border-bottom:1.5px solid rgba(205,165,255,.5);';
+  bubble.appendChild(tail);
+  const bubbleText = document.createElement('span');
+  bubble.insertBefore(bubbleText, tail);
 
-  function showBubble(text) {
-    bubble.textContent = text;
-    updateBubblePos();
-    bubble.style.opacity   = '1';
-    bubble.style.transform = 'scale(1) translateY(0)';
-    state.chatVisible = true;
+  function say(text, ms) {
+    bubbleText.textContent = text;
+    S.bubbleUntil = performance.now() + (ms || 3000);
+    bubble.style.opacity = '1';
+    bubble.style.transform = 'translate(-50%,-100%) scale(1)';
   }
-  function updateBubblePos() {
-    const vx = toViewX(state.x);
-    const vy = toViewY(state.y);
-    bubble.style.left = Math.min(vx + 22, window.innerWidth - 240) + 'px';
-    bubble.style.top  = Math.max(vy - 65, 10) + 'px';
-  }
-  function hideBubble(delay) {
-    setTimeout(() => {
-      bubble.style.opacity   = '0';
-      bubble.style.transform = 'scale(0.8) translateY(6px)';
-      state.chatVisible = false;
-    }, delay || 0);
-  }
-
-  /* ── DUST PARTICLES ─────────────────────────────────────── */
-  function spawnDust(x, y, color, count) {
-    const n = count || 4;
-    for (let i = 0; i < n; i++) {
-      state.dustParticles.push({
-        x, y,
-        vx: (Math.random() - 0.5) * 3,
-        vy: (Math.random() - 0.5) * 3 - 1,
-        life: 1,
-        size: Math.random() * 3 + 1,
-        color: color || `hsl(${270 + Math.random() * 60},80%,75%)`
-      });
+  function bubbleTick(now, vx, vy) {
+    if (S.bubbleUntil && now > S.bubbleUntil) {
+      S.bubbleUntil = 0;
+      bubble.style.opacity = '0';
+      bubble.style.transform = 'translate(-50%,-100%) scale(.8)';
+    }
+    if (S.bubbleUntil) {
+      bubble.style.left = Math.max(110, Math.min(innerWidth - 110, vx)) + 'px';
+      bubble.style.top = Math.max(58, vy - 34) + 'px';
     }
   }
 
-  /* ── MAGIC RIPPLE (on click) ────────────────────────────── */
-  function triggerMagicRipple() {
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    const colors = ['rgba(220,170,255,', 'rgba(255,200,240,', 'rgba(180,130,255,', 'rgba(255,230,255,'];
+  /* ---------- section detection ---------- */
+  function detectSection() {
+    const midY = innerHeight / 2;
+    let key = 'default';
+    document.querySelectorAll('section,[data-section],[class*="section"],[id],.hero,.about,.services,.portfolio,.contact').forEach(el => {
+      const r = el.getBoundingClientRect();
+      if (r.height < 50 || r.top > midY || r.bottom < midY) return;
+      const id = (el.id + ' ' + el.className).toLowerCase();
+      if (/hero|banner|intro/.test(id)) key = 'hero';
+      else if (/about/.test(id)) key = 'about';
+      else if (/service/.test(id)) key = 'services';
+      else if (/portfolio|work|project|gallery/.test(id)) key = 'portfolio';
+      else if (/contact/.test(id)) key = 'contact';
+    });
+    return key;
+  }
+
+  /* ---------- dwell watcher: "she knows you stayed" ---------- */
+  let lastActivity = performance.now();
+  let dwellSection = detectSection();
+  function activity() {
+    lastActivity = performance.now();
+    const k = detectSection();
+    if (k !== dwellSection) dwellSection = k;
+    if (S.mode === 'nap') wake();
+  }
+  addEventListener('scroll', activity, { passive: true });
+  addEventListener('mousemove', activity, { passive: true });
+  addEventListener('touchstart', activity, { passive: true });
+
+  function maybeVisit(now) {
+    if (S.mode === 'approach' || S.mode === 'talk' || S.mode === 'leave') return;
+    const still = now - lastActivity;
+    const cooled = now - S.lastVisit > rand(20000, 35000);   // 20–35s between visits
+    if (still > rand(3500, 6500) && cooled) startVisit();
+  }
+
+  function startVisit() {
+    S.lastVisit = performance.now();
+    S.mode = 'approach';
+    S.excited = 1;
+    // fly to a visible spot, slightly random
+    S.tx = sX() + innerWidth * rand(0.35, 0.65);
+    S.ty = sY() + innerHeight * rand(0.3, 0.5);
+  }
+
+  function wake() {
+    S.mode = 'drift';
+    S.modeTimer = 0;
+    say(pick(WAKE), 2200);
+  }
+
+  /* ---------- behavior brain ---------- */
+  function chooseIdleMode() {
+    const r = Math.random();
+    if (r < 0.40) {           // drift somewhere new on the full page
+      S.mode = 'drift';
+      const m = 70;
+      S.tx = rand(m, pageW() - m);
+      S.ty = rand(m, pageH() - m);
+      S.modeTimer = rand(3000, 7000);
+    } else if (r < 0.65) {    // hover in place, bobbing
+      S.mode = 'hover';
+      S.modeTimer = rand(1500, 4000);
+      if (Math.random() < 0.3) say(pick(IDLE), 2200);
+    } else if (r < 0.80) {    // quick curious dart nearby
+      S.mode = 'dart';
+      S.tx = S.x + rand(-260, 260);
+      S.ty = S.y + rand(-180, 180);
+      S.excited = Math.max(S.excited, 0.7);
+      S.modeTimer = rand(700, 1300);
+    } else if (r < 0.93) {    // perch: settle low and rest wings
+      S.mode = 'perch';
+      S.ty = S.y + rand(40, 120);
+      S.tx = S.x + rand(-60, 60);
+      S.modeTimer = rand(3000, 6000);
+    } else {                  // nap
+      S.mode = 'nap';
+      S.modeTimer = rand(9000, 16000);
+      if (Math.random() < 0.5) say(pick(SLEEPY), 2500);
+    }
+    // keep targets inside page
+    const m = 60;
+    S.tx = Math.max(m, Math.min(pageW() - m, S.tx));
+    S.ty = Math.max(m, Math.min(pageH() - m, S.ty));
+  }
+
+  function physics(strength, maxSpd, damp) {
+    const dx = S.tx - S.x, dy = S.ty - S.y;
+    S.vx += dx * strength; S.vy += dy * strength;
+    S.vx *= damp; S.vy *= damp;
+    const sp = Math.hypot(S.vx, S.vy);
+    if (sp > maxSpd) { S.vx = S.vx / sp * maxSpd; S.vy = S.vy / sp * maxSpd; }
+    S.x += S.vx; S.y += S.vy;
+    if (Math.abs(S.vx) > 0.3) S.facing = S.vx > 0 ? 1 : -1;
+  }
+
+  let talkPhase = 0;
+  function brain(dt, now) {
+    S.modeTimer -= dt;
+    S.excited = Math.max(0, S.excited - dt / 2500);
+
+    switch (S.mode) {
+      case 'drift':
+        physics(0.012, 2.2, 0.86);
+        if (S.modeTimer <= 0 || Math.hypot(S.tx - S.x, S.ty - S.y) < 8) chooseIdleMode();
+        break;
+      case 'hover':
+        S.x += Math.sin(now * 0.0017) * 0.35;
+        S.y += Math.cos(now * 0.0013) * 0.3;
+        if (S.modeTimer <= 0) chooseIdleMode();
+        break;
+      case 'dart':
+        physics(0.06, 8, 0.82);
+        if (S.modeTimer <= 0) chooseIdleMode();
+        break;
+      case 'perch':
+        physics(0.02, 1.5, 0.8);
+        if (S.modeTimer <= 0) chooseIdleMode();
+        break;
+      case 'nap':
+        S.y += Math.sin(now * 0.0015) * 0.12;
+        if (S.modeTimer <= 0) wake();
+        break;
+      case 'approach':
+        physics(0.045, 7, 0.8);
+        if (Math.hypot(S.tx - S.x, S.ty - S.y) < 14) {
+          S.mode = 'talk';
+          talkPhase = now + rand(4000, 6000);          // stays 4–6 s
+          say(pick(MSG[dwellSection] || MSG.default), 4200);
+          burstDust(S.x, S.y, 10);
+        }
+        break;
+      case 'talk':
+        S.x += Math.sin(now * 0.003) * 0.3;
+        S.y += Math.cos(now * 0.0024) * 0.25;
+        if (now > talkPhase) {
+          S.mode = 'leave';
+          // drift off toward a random far point on the page
+          S.tx = Math.random() < 0.5 ? rand(60, pageW() * 0.25) : rand(pageW() * 0.75, pageW() - 60);
+          S.ty = Math.max(60, Math.min(pageH() - 60, S.y + rand(-500, 500)));
+        }
+        break;
+      case 'leave':
+        physics(0.014, 3.2, 0.86);
+        if (Math.hypot(S.tx - S.x, S.ty - S.y) < 20) chooseIdleMode();
+        break;
+    }
+  }
+
+  /* ---------- particles ---------- */
+  function burstDust(x, y, n) {
+    for (let i = 0; i < n; i++) S.dust.push({
+      x, y, vx: rand(-1.6, 1.6), vy: rand(-2.4, 0.4),
+      life: 1, size: rand(1, 3.2),
+      color: `hsl(${275 + Math.random() * 55},85%,76%)`
+    });
+  }
+
+  function bigRipple() {
+    const cx = S.x - sX(), cy = S.y - sY();
+    for (let i = 0; i < 5; i++) S.ripples.push({
+      x: cx, y: cy, r: 0,
+      maxR: Math.max(innerWidth, innerHeight) * (0.55 + i * 0.13),
+      speed: 11 + i * 5, life: 1, delay: i * 90,
+      color: ['rgba(220,170,255,', 'rgba(255,200,240,', 'rgba(180,130,255,', 'rgba(255,230,255,'][i % 4]
+    });
+    for (let i = 0; i < 36; i++) {
+      const a = Math.PI * 2 * i / 36, sp = rand(2.5, 7);
+      S.dust.push({ x: S.x, y: S.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1, size: rand(2, 5), color: `hsl(${270 + Math.random() * 80},90%,75%)` });
+    }
+    S.excited = 1;
+    say(pick(CLICK), 2300);
+  }
+
+  hit.addEventListener('click', () => {
+    if (S.mode === 'nap') { wake(); }
+    bigRipple();
+  });
+
+  /* ---------- drawing ---------- */
+  function star(x, y, r, alpha, color) {
+    ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.beginPath();
     for (let i = 0; i < 5; i++) {
-      state.ripples.push({
-        x: cx, y: cy,
-        r: 0,
-        maxR: Math.max(canvas.width, canvas.height) * (0.5 + i * 0.12),
-        speed: 12 + i * 5,
-        life: 1,
-        color: colors[i % colors.length],
-        delay: i * 80
-      });
+      const a1 = i * 4 * Math.PI / 5 - Math.PI / 2;
+      const a2 = a1 + 2 * Math.PI / 5;
+      i ? ctx.lineTo(x + r * Math.cos(a1), y + r * Math.sin(a1)) : ctx.moveTo(x + r * Math.cos(a1), y + r * Math.sin(a1));
+      ctx.lineTo(x + r * 0.4 * Math.cos(a2), y + r * 0.4 * Math.sin(a2));
     }
-    for (let i = 0; i < 40; i++) {
-      const angle = (Math.PI * 2 * i) / 40;
-      const speed = 3 + Math.random() * 5;
-      state.dustParticles.push({
-        x: state.x, y: state.y,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 1,
-        size: Math.random() * 4 + 2,
-        color: `hsl(${270 + Math.random() * 80},90%,75%)`
-      });
-    }
-    state.emotion = 'excited';
-    showBubble('Eee~! You found me! ✨💜');
-    hideBubble(2500);
+    ctx.closePath(); ctx.fill(); ctx.restore();
   }
 
   function drawRipples() {
-    state.ripples = state.ripples.filter(rip => rip.life > 0);
-    state.ripples.forEach(rip => {
-      if (rip.delay > 0) { rip.delay -= 16; return; }
-      rip.r += rip.speed;
-      rip.life = 1 - rip.r / rip.maxR;
-      if (rip.life < 0) { rip.life = 0; return; }
+    S.ripples = S.ripples.filter(r => r.life > 0);
+    for (const r of S.ripples) {
+      if (r.delay > 0) { r.delay -= 16; continue; }
+      r.r += r.speed;
+      r.life = Math.max(0, 1 - r.r / r.maxR);
       ctx.save();
-      ctx.globalAlpha = rip.life * 0.35;
-      ctx.strokeStyle = rip.color + '1)';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(rip.x, rip.y, rip.r, 0, Math.PI * 2);
-      ctx.stroke();
-      if (rip.r < rip.maxR * 0.35) {
-        const grad = ctx.createRadialGradient(rip.x, rip.y, 0, rip.x, rip.y, rip.r);
-        grad.addColorStop(0, rip.color + (rip.life * 0.12) + ')');
-        grad.addColorStop(1, rip.color + '0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(rip.x, rip.y, rip.r, 0, Math.PI * 2);
-        ctx.fill();
+      ctx.globalAlpha = r.life * 0.35;
+      ctx.strokeStyle = r.color + '1)'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke();
+      if (r.r < r.maxR * 0.35) {
+        const g = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, r.r);
+        g.addColorStop(0, r.color + r.life * 0.12 + ')');
+        g.addColorStop(1, r.color + '0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.fill();
       }
-      const numStars = 8;
-      for (let i = 0; i < numStars; i++) {
-        const a = (Math.PI * 2 * i) / numStars + rip.r * 0.01;
-        drawStar(ctx, rip.x + Math.cos(a) * rip.r, rip.y + Math.sin(a) * rip.r, 3, rip.life * 0.7, '#f5d0ff');
+      for (let i = 0; i < 8; i++) {
+        const a = Math.PI * 2 * i / 8 + r.r * 0.01;
+        star(r.x + Math.cos(a) * r.r, r.y + Math.sin(a) * r.r, 3, r.life * 0.7, '#f5d0ff');
       }
       ctx.restore();
-    });
-  }
-
-  function drawStar(ctx, x, y, r, alpha, color) {
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    for (let i = 0; i < 5; i++) {
-      const a1 = (i * 4 * Math.PI / 5) - Math.PI / 2;
-      const a2 = (i * 4 * Math.PI / 5 + 2 * Math.PI / 5) - Math.PI / 2;
-      i === 0 ? ctx.moveTo(x + r * Math.cos(a1), y + r * Math.sin(a1))
-              : ctx.lineTo(x + r * Math.cos(a1), y + r * Math.sin(a1));
-      ctx.lineTo(x + r * 0.4 * Math.cos(a2), y + r * 0.4 * Math.sin(a2));
     }
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
   }
 
-  /* ── DRAW FAIRY ─────────────────────────────────────────── */
-  // cx/cy are CANVAS (viewport) coords — already offset from page coords
+  function drawParticles() {
+    S.trail = S.trail.filter(p => (p.life -= 0.03) > 0);
+    for (const p of S.trail) {
+      ctx.globalAlpha = p.life * 0.35;
+      ctx.fillStyle = 'rgb(210,170,255)';
+      ctx.beginPath(); ctx.arc(p.x - sX(), p.y - sY(), p.size * p.life, 0, Math.PI * 2); ctx.fill();
+    }
+    S.dust = S.dust.filter(d => (d.life -= 0.022) > 0);
+    for (const d of S.dust) {
+      d.x += d.vx; d.y += d.vy; d.vy -= 0.05;
+      const cx = d.x - sX(), cy = d.y - sY();
+      ctx.globalAlpha = d.life * 0.8; ctx.fillStyle = d.color;
+      ctx.beginPath(); ctx.arc(cx, cy, d.size * d.life, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* fairy ~30% smaller & slimmer, soft round face, drawn at scale F */
+  const F = 0.72;
   function drawFairy(cx, cy, t) {
-    const bob  = Math.sin(t * 0.04) * 3.5;
-    const bobY = cy + bob;
-    const wing = Math.sin(t * 0.28) * 0.45;
-    const glow = 0.5 + 0.5 * Math.sin(t * 0.03);
-    const isSleeping = state.phase === 'sleeping';
-    const isExcited  = state.emotion === 'excited';
+    const napping = S.mode === 'nap';
+    const perched = S.mode === 'perch';
+    const bob = Math.sin(t * 0.004) * (napping ? 1.2 : 3) * F;
+    const y = cy + bob;
+    const flapSpeed = napping || perched ? 0.06 : 0.28 + S.excited * 0.25;
+    const wing = Math.sin(t * flapSpeed * 0.06) * (napping ? 0.08 : 0.45 + S.excited * 0.5);
+    const glow = 0.5 + 0.5 * Math.sin(t * 0.002);
 
     ctx.save();
+    ctx.translate(cx, y);
+    ctx.scale(S.facing * F, F);
 
-    const aura = ctx.createRadialGradient(cx, bobY, 0, cx, bobY, 52);
-    aura.addColorStop(0, `rgba(220,170,255,${0.16 * glow})`);
-    aura.addColorStop(0.5, `rgba(180,120,255,${0.07 * glow})`);
+    // aura
+    const aura = ctx.createRadialGradient(0, 0, 0, 0, 0, 46);
+    aura.addColorStop(0, `rgba(220,170,255,${0.15 * glow})`);
     aura.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = aura;
-    ctx.beginPath();
-    ctx.ellipse(cx, bobY, 52, 52, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, 46, 0, Math.PI * 2); ctx.fill();
 
+    // wings (slim, four)
     ctx.save();
-    ctx.translate(cx, bobY - 4);
-    const flapMult = isExcited ? 2.2 : 1;
-
-    ctx.save();
-    ctx.rotate(-0.25 + wing * flapMult);
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.bezierCurveTo(-26, -30, -48, -8, -32, 10);
-    ctx.bezierCurveTo(-20, 20, -5, 10, 0, 0);
-    const wg1 = ctx.createLinearGradient(-42, -18, 0, 10);
-    wg1.addColorStop(0, `rgba(230,200,255,${0.6 + 0.15*glow})`);
-    wg1.addColorStop(1, `rgba(200,160,255,0.18)`);
-    ctx.fillStyle = wg1; ctx.fill();
-    ctx.strokeStyle = 'rgba(190,150,255,0.28)'; ctx.lineWidth = 0.6; ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.rotate(0.25 - wing * flapMult);
-    ctx.scale(-1, 1);
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.bezierCurveTo(-26, -30, -48, -8, -32, 10);
-    ctx.bezierCurveTo(-20, 20, -5, 10, 0, 0);
-    const wg2 = ctx.createLinearGradient(-42, -18, 0, 10);
-    wg2.addColorStop(0, `rgba(230,200,255,${0.6 + 0.15*glow})`);
-    wg2.addColorStop(1, `rgba(200,160,255,0.18)`);
-    ctx.fillStyle = wg2; ctx.fill();
-    ctx.strokeStyle = 'rgba(190,150,255,0.28)'; ctx.lineWidth = 0.6; ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.rotate(-0.08 + wing * 0.5);
-    ctx.beginPath();
-    ctx.moveTo(0, 2);
-    ctx.bezierCurveTo(-14, 2, -24, 18, -13, 24);
-    ctx.bezierCurveTo(-5, 27, -1, 16, 0, 2);
-    ctx.fillStyle = `rgba(215,180,255,${0.32 + 0.08*glow})`; ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.rotate(0.08 - wing * 0.5);
-    ctx.scale(-1, 1);
-    ctx.beginPath();
-    ctx.moveTo(0, 2);
-    ctx.bezierCurveTo(-14, 2, -24, 18, -13, 24);
-    ctx.bezierCurveTo(-5, 27, -1, 16, 0, 2);
-    ctx.fillStyle = `rgba(215,180,255,${0.32 + 0.08*glow})`; ctx.fill();
-    ctx.restore();
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(cx, bobY);
-
-    const bodyGrad = ctx.createLinearGradient(0, -12, 0, 14);
-    bodyGrad.addColorStop(0, '#efd0ff');
-    bodyGrad.addColorStop(0.5, '#d8a8ff');
-    bodyGrad.addColorStop(1, '#c080ff');
-    ctx.fillStyle = bodyGrad;
-    ctx.beginPath(); ctx.ellipse(0, 2, 4.5, 9, 0, 0, Math.PI * 2); ctx.fill();
-
-    ctx.fillStyle = 'rgba(180,100,255,0.35)';
-    ctx.beginPath(); ctx.ellipse(0, 4, 3, 2.5, 0, 0, Math.PI * 2); ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(-4.5, 7);
-    ctx.bezierCurveTo(-10, 13, -9, 20, 0, 21);
-    ctx.bezierCurveTo(9, 20, 10, 13, 4.5, 7);
-    ctx.closePath();
-    ctx.fillStyle = `rgba(200,145,255,0.82)`; ctx.fill();
-    ctx.fillStyle = 'rgba(240,210,255,0.35)';
-    ctx.beginPath(); ctx.ellipse(-1.5, 13, 2, 4, -0.3, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.beginPath(); ctx.arc(0.5, 1, 1, 0, Math.PI * 2); ctx.fill();
-
-    ctx.strokeStyle = '#f0c8ff'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(-4, 0); ctx.bezierCurveTo(-9, -2, -11, 3, -10, 7); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(4, 0);  ctx.bezierCurveTo(9, -2, 11, 3, 10, 7);  ctx.stroke();
-
-    ctx.fillStyle = '#fce8de';
-    ctx.beginPath(); ctx.ellipse(0, -15, 6.5, 7, 0, 0, Math.PI * 2); ctx.fill();
-
-    ctx.fillStyle = 'rgba(255,165,165,0.42)';
-    ctx.beginPath(); ctx.ellipse(-3.8, -12.5, 2.3, 1.4, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse( 3.8, -12.5, 2.3, 1.4, 0, 0, Math.PI * 2); ctx.fill();
-
-    if (!isSleeping) {
-      if (state.isBlinking) {
-        ctx.strokeStyle = '#5a2d82'; ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.moveTo(-3.2, -15.5); ctx.lineTo(-1.4, -15.5); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(1.4, -15.5);  ctx.lineTo(3.2, -15.5);  ctx.stroke();
-      } else {
-        ctx.fillStyle = '#5a2d82';
-        ctx.beginPath(); ctx.ellipse(-2.2, -16, 1.7, 1.9, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.ellipse( 2.2, -16, 1.7, 1.9, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = 'white';
-        ctx.beginPath(); ctx.arc(-2.9, -17, 0.65, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc( 1.5, -17, 0.65, 0, Math.PI * 2); ctx.fill();
-      }
-    } else {
-      ctx.strokeStyle = '#b090d0'; ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.arc(-2.2, -15.5, 1.8, Math.PI, 0); ctx.stroke();
-      ctx.beginPath(); ctx.arc( 2.2, -15.5, 1.8, Math.PI, 0); ctx.stroke();
-    }
-
-    ctx.strokeStyle = '#c47ab8'; ctx.lineWidth = 1;
-    ctx.beginPath();
-    if (isSleeping)       ctx.arc(0, -11.5, 1.8, 0.2, Math.PI - 0.2);
-    else if (isExcited)   ctx.arc(0, -11.5, 2.4, 0.1, Math.PI - 0.1);
-    else                  ctx.arc(0, -11.5, 2, 0.2, Math.PI - 0.2);
-    ctx.stroke();
-
-    ctx.fillStyle = '#c070ff';
-    ctx.beginPath(); ctx.ellipse(-4.8, -19, 3.8, 5, -0.5, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse( 4.8, -19, 3.8, 5, 0.5, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(0, -22, 3.2, 4.2, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#d090ff'; ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(-5, -22);
-    ctx.bezierCurveTo(-8, -27, -4, -30, -2, -27);
-    ctx.stroke();
-
-    if (!isSleeping) {
+    ctx.translate(0, -4);
+    for (const side of [-1, 1]) {
+      // upper
       ctx.save();
-      ctx.rotate(0.28 + Math.sin(t * 0.05) * 0.12);
-      ctx.strokeStyle = '#e0b8ff'; ctx.lineWidth = 1.1;
-      ctx.beginPath(); ctx.moveTo(5, -9); ctx.lineTo(16, -21); ctx.stroke();
-      const sx = 16, sy = -21, sr = 3;
-      ctx.fillStyle = `rgba(255,242,120,${0.72 + 0.28 * glow})`;
+      ctx.scale(side, 1);
+      ctx.rotate(-0.22 + wing);
       ctx.beginPath();
-      for (let i = 0; i < 5; i++) {
-        const a1 = (i * 4 * Math.PI / 5) - Math.PI / 2;
-        const a2 = (i * 4 * Math.PI / 5 + 2 * Math.PI / 5) - Math.PI / 2;
-        i === 0 ? ctx.moveTo(sx + sr * Math.cos(a1), sy + sr * Math.sin(a1))
-                : ctx.lineTo(sx + sr * Math.cos(a1), sy + sr * Math.sin(a1));
-        ctx.lineTo(sx + sr * 0.4 * Math.cos(a2), sy + sr * 0.4 * Math.sin(a2));
-      }
-      ctx.closePath(); ctx.fill();
-      const wg = ctx.createRadialGradient(sx, sy, 0, sx, sy, 8);
-      wg.addColorStop(0, `rgba(255,242,120,${0.35 * glow})`);
-      wg.addColorStop(1, 'transparent');
-      ctx.fillStyle = wg;
-      ctx.beginPath(); ctx.arc(sx, sy, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(-20, -26, -40, -7, -26, 8);
+      ctx.bezierCurveTo(-15, 16, -4, 8, 0, 0);
+      const g1 = ctx.createLinearGradient(-34, -16, 0, 8);
+      g1.addColorStop(0, `rgba(232,205,255,${0.6 + 0.15 * glow})`);
+      g1.addColorStop(1, 'rgba(200,160,255,.18)');
+      ctx.fillStyle = g1; ctx.fill();
+      ctx.strokeStyle = 'rgba(190,150,255,.3)'; ctx.lineWidth = 0.5; ctx.stroke();
+      ctx.restore();
+      // lower
+      ctx.save();
+      ctx.scale(side, 1);
+      ctx.rotate(-0.06 + wing * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(0, 2);
+      ctx.bezierCurveTo(-11, 2, -18, 14, -10, 19);
+      ctx.bezierCurveTo(-4, 21, -1, 13, 0, 2);
+      ctx.fillStyle = `rgba(215,180,255,${0.3 + 0.08 * glow})`;
+      ctx.fill();
       ctx.restore();
     }
-
     ctx.restore();
 
-    if (isSleeping) {
-      const bg = ctx.createRadialGradient(cx, bobY + 14, 0, cx, bobY + 14, 38);
-      bg.addColorStop(0, `rgba(200,150,255,${0.13 * glow})`);
-      bg.addColorStop(1, 'transparent');
-      ctx.fillStyle = bg;
-      ctx.beginPath(); ctx.ellipse(cx, bobY + 14, 38, 16, 0, 0, Math.PI * 2); ctx.fill();
-      const za = 0.5 + 0.5 * Math.sin(t * 0.06);
+    // slim body
+    const bg = ctx.createLinearGradient(0, -10, 0, 12);
+    bg.addColorStop(0, '#efd0ff'); bg.addColorStop(0.55, '#d8a8ff'); bg.addColorStop(1, '#c080ff');
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.ellipse(0, 2, 3.2, 8, 0, 0, Math.PI * 2); ctx.fill();
+
+    // little flared skirt
+    ctx.beginPath();
+    ctx.moveTo(-3.2, 6.5);
+    ctx.bezierCurveTo(-7, 12, -6.5, 17, 0, 18);
+    ctx.bezierCurveTo(6.5, 17, 7, 12, 3.2, 6.5);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(200,145,255,.85)'; ctx.fill();
+    ctx.fillStyle = 'rgba(245,220,255,.4)';
+    ctx.beginPath(); ctx.ellipse(-1, 11.5, 1.5, 3.2, -0.3, 0, Math.PI * 2); ctx.fill();
+
+    // thin arms
+    ctx.strokeStyle = '#f0c8ff'; ctx.lineWidth = 1.1; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-3, 0); ctx.bezierCurveTo(-7, -1.5, -8.5, 2.5, -7.5, 6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(3, 0); ctx.bezierCurveTo(7, -1.5, 8.5, 2.5, 7.5, 6); ctx.stroke();
+
+    // head — bigger relative to body = cuter
+    ctx.fillStyle = '#fdeae0';
+    ctx.beginPath(); ctx.arc(0, -14, 6.2, 0, Math.PI * 2); ctx.fill();
+
+    // blush
+    ctx.fillStyle = 'rgba(255,160,170,.45)';
+    ctx.beginPath(); ctx.ellipse(-3.4, -12, 1.9, 1.1, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(3.4, -12, 1.9, 1.1, 0, 0, Math.PI * 2); ctx.fill();
+
+    // eyes — big and sparkly
+    if (napping) {
+      ctx.strokeStyle = '#b090d0'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(-2.1, -14, 1.6, Math.PI * 0.1, Math.PI * 0.9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(2.1, -14, 1.6, Math.PI * 0.1, Math.PI * 0.9); ctx.stroke();
+    } else if (S.blink) {
+      ctx.strokeStyle = '#5a2d82'; ctx.lineWidth = 1.1;
+      ctx.beginPath(); ctx.moveTo(-3, -14); ctx.lineTo(-1.2, -14); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(1.2, -14); ctx.lineTo(3, -14); ctx.stroke();
+    } else {
+      ctx.fillStyle = '#5a2d82';
+      ctx.beginPath(); ctx.ellipse(-2.1, -14.4, 1.6, 1.9, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(2.1, -14.4, 1.6, 1.9, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'white';
+      ctx.beginPath(); ctx.arc(-2.7, -15.2, 0.6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(1.5, -15.2, 0.6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-1.7, -13.6, 0.3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(2.5, -13.6, 0.3, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // tiny smile
+    ctx.strokeStyle = '#c47ab8'; ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.arc(0, -10.8, napping ? 1.3 : 1.6 + S.excited * 0.7, 0.25, Math.PI - 0.25);
+    ctx.stroke();
+
+    // hair — soft bob with a strand
+    ctx.fillStyle = '#c070ff';
+    ctx.beginPath(); ctx.ellipse(-4, -17, 3.2, 4.2, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(4, -17, 3.2, 4.2, 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, -19.5, 2.8, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#d090ff'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-4, -19.5); ctx.bezierCurveTo(-6.5, -23.5, -3.5, -26, -1.8, -23.5); ctx.stroke();
+
+    // wand (hidden while napping/perched)
+    if (!napping && !perched) {
+      ctx.save();
+      ctx.rotate(0.28 + Math.sin(t * 0.004) * 0.12);
+      ctx.strokeStyle = '#e0b8ff'; ctx.lineWidth = 0.9;
+      ctx.beginPath(); ctx.moveTo(4, -8); ctx.lineTo(13, -18); ctx.stroke();
+      star(13, -18, 2.6, 0.7 + 0.3 * glow, 'rgb(255,242,120)');
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // zzz while napping
+    if (napping) {
+      const za = 0.5 + 0.5 * Math.sin(t * 0.005);
       ctx.fillStyle = `rgba(180,130,255,${0.65 * za})`;
-      ctx.font = `bold ${10 + za * 3}px Georgia`;
-      ctx.fillText('z', cx + 16, bobY - 26 - za * 5);
-      ctx.font = `bold ${7 + za * 2}px Georgia`;
-      ctx.fillText('z', cx + 24, bobY - 34 - za * 3);
+      ctx.font = `bold ${(8 + za * 3) * F}px Georgia`;
+      ctx.fillText('z', cx + 12 * F, y - 22 * F - za * 4);
+      ctx.font = `bold ${(6 + za * 2) * F}px Georgia`;
+      ctx.fillText('z', cx + 19 * F, y - 29 * F - za * 3);
     }
   }
 
-  /* ── DRAW TRAIL (in canvas/viewport coords) ─────────────── */
-  function drawTrail() {
-    state.trailPoints.forEach(p => {
-      const cx = toCanvasX(p.x);
-      const cy = toCanvasY(p.y);
-      ctx.globalAlpha = p.life * 0.38;
-      ctx.fillStyle = 'rgba(210,170,255,1)';
-      ctx.beginPath();
-      ctx.arc(cx, cy, p.size * p.life, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1;
-  }
-
-  /* ── DRAW DUST (in canvas/viewport coords) ──────────────── */
-  function drawDust() {
-    state.dustParticles.forEach(d => {
-      const cx = toCanvasX(d.x);
-      const cy = toCanvasY(d.y);
-      ctx.globalAlpha = d.life * 0.82;
-      ctx.fillStyle = d.color;
-      ctx.beginPath();
-      ctx.arc(cx, cy, d.size * d.life, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = d.color;
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.moveTo(cx - d.size * 1.4, cy);
-      ctx.lineTo(cx + d.size * 1.4, cy);
-      ctx.moveTo(cx, cy - d.size * 1.4);
-      ctx.lineTo(cx, cy + d.size * 1.4);
-      ctx.stroke();
-    });
-    ctx.globalAlpha = 1;
-  }
-
-  /* ── SECTION DETECTION ──────────────────────────────────── */
-  function detectSection() {
-    const midY = window.innerHeight / 2;
-    const els  = document.querySelectorAll([
-      'section','[data-section]','[class*="section"]',
-      '[id*="about"]','[id*="services"]','[id*="contact"]',
-      '[id*="portfolio"]','[id*="hero"]',
-      '.hero','.about','.services','.portfolio','.contact'
-    ].join(','));
-    let foundKey = 'default';
-    els.forEach(el => {
-      const r = el.getBoundingClientRect();
-      if (r.top <= midY && r.bottom >= midY) {
-        const id = (el.id + ' ' + el.className).toLowerCase();
-        if      (id.includes('hero') || id.includes('banner') || id.includes('intro')) foundKey = 'hero';
-        else if (id.includes('about'))    foundKey = 'about';
-        else if (id.includes('service'))  foundKey = 'services';
-        else if (id.includes('portfolio') || id.includes('work') || id.includes('project')) foundKey = 'portfolio';
-        else if (id.includes('contact'))  foundKey = 'contact';
-        else foundKey = 'default';
-      }
-    });
-    return foundKey;
-  }
-
-  function pickMsg(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-  /* ── MOVEMENT (all in PAGE space) ──────────────────────── */
-  function moveToTarget() {
-    const dx   = state.targetX - state.x;
-    const dy   = state.targetY - state.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < 2) return;
-
-    const speed    = state.phase === 'approaching' ? 0.045 : 0.02;
-    state.vx += dx * speed;
-    state.vy += dy * speed;
-    state.vx *= 0.80;
-    state.vy *= 0.80;
-
-    const maxSpeed = state.phase === 'approaching' ? 7 : 3;
-    const sv = Math.sqrt(state.vx * state.vx + state.vy * state.vy);
-    if (sv > maxSpeed) { state.vx = state.vx / sv * maxSpeed; state.vy = state.vy / sv * maxSpeed; }
-
-    state.x += state.vx;
-    state.y += state.vy;
-
-    // Clamp to full page bounds
-    const margin = 50;
-    state.x = Math.max(margin, Math.min(pageW() - margin, state.x));
-    state.y = Math.max(margin, Math.min(pageH() - margin, state.y));
-  }
-
-  let wanderTimer = 0;
-  function doWander() {
-    wanderTimer--;
-    if (wanderTimer <= 0) {
-      // Pick a random spot anywhere on the FULL page
-      const m = 80;
-      state.targetX = m + Math.random() * (pageW() - m * 2);
-      state.targetY = m + Math.random() * (pageH() - m * 2);
-      wanderTimer = 200 + Math.random() * 260;
-    }
-    moveToTarget();
-  }
-
-  /* ── APPROACH ───────────────────────────────────────────── */
-  function startApproach(sectionKey) {
-    if (state.phase === 'talking' || state.phase === 'approaching') return;
-    state.phase   = 'approaching';
-    state.emotion = 'excited';
-
-    // Approach somewhere visible in the current viewport (page coords)
-    const tx = scrollX() + window.innerWidth  * 0.5 + (Math.random() - 0.5) * 80;
-    const ty = scrollY() + window.innerHeight * 0.42 + (Math.random() - 0.5) * 60;
-    state.targetX = tx;
-    state.targetY = ty;
-
+  /* ---------- blink ---------- */
+  (function blinkLoop() {
     setTimeout(() => {
-      if (state.phase !== 'approaching') return;
-      state.phase   = 'talking';
-      state.emotion = 'happy';
-      const msg = pickMsg(SECTION_MESSAGES[sectionKey] || SECTION_MESSAGES.default);
-      showBubble(msg);
-      spawnDust(state.x, state.y, '#e0b0ff', 8);
+      if (S.mode !== 'nap') { S.blink = true; setTimeout(() => S.blink = false, 130); }
+      blinkLoop();
+    }, rand(3000, 8000));
+  })();
 
-      hideBubble(4500);
-      setTimeout(() => {
-        state.phase = 'leaving';
-        // Leave to a corner of the FULL page, not necessarily visible
-        const corners = [
-          [pageW() - 65, scrollY() + 65],
-          [65,            scrollY() + 65],
-          [pageW() - 65, scrollY() + window.innerHeight - 65],
-          [65,            scrollY() + window.innerHeight - 65]
-        ];
-        const [cx2, cy2] = corners[Math.floor(Math.random() * corners.length)];
-        state.targetX = cx2;
-        state.targetY = cy2;
-        setTimeout(() => {
-          state.phase   = 'wandering';
-          state.emotion = 'happy';
-          scheduleSleep();
-        }, 3000);
-      }, 5200);
-    }, 2200);
-  }
-
-  /* ── DWELL CHECK ────────────────────────────────────────── */
-  let dwellFired = false;
+  /* ---------- greeting + first visit ---------- */
   setTimeout(() => {
-    if (!dwellFired) {
-      dwellFired = true;
-      startApproach(detectSection());
-    }
-  }, 3000);
-
-  let sectionChangeTimer = null;
-  let lastSectionKey = null;
-  function checkSectionDwell() {
-    const key = detectSection();
-    if (key !== lastSectionKey) {
-      lastSectionKey = key;
-      clearTimeout(sectionChangeTimer);
-      sectionChangeTimer = setTimeout(() => {
-        if (state.phase === 'sleeping') { state.phase = 'wandering'; state.emotion = 'happy'; }
-        if (state.phase === 'wandering') startApproach(key);
-      }, 3000);
-    }
-  }
-  window.addEventListener('scroll', checkSectionDwell, { passive: true });
-  setInterval(checkSectionDwell, 1200);
-
-  /* ── SLEEP ──────────────────────────────────────────────── */
-  function scheduleSleep() {
-    clearTimeout(state.sleepTimer);
-    state.sleepTimer = setTimeout(() => {
-      if (state.phase === 'wandering') {
-        state.phase   = 'sleeping';
-        state.emotion = 'sleepy';
-        state.targetX = state.x;
-        state.targetY = state.y;
-      }
-    }, 22000 + Math.random() * 12000);
-  }
-  scheduleSleep();
-
-  /* ── IDLE THOUGHTS ──────────────────────────────────────── */
-  function scheduleIdleThought() {
-    clearTimeout(state.idleTimer);
-    state.idleTimer = setTimeout(() => {
-      if (state.phase === 'wandering' && !state.chatVisible) {
-        showBubble(pickMsg(IDLE_THOUGHTS));
-        hideBubble(2500);
-      }
-      scheduleIdleThought();
-    }, 16000 + Math.random() * 20000);
-  }
-  scheduleIdleThought();
-
-  /* ── BLINK ──────────────────────────────────────────────── */
-  function scheduleBlink() {
-    setTimeout(() => {
-      if (state.phase !== 'sleeping') {
-        state.isBlinking = true;
-        setTimeout(() => { state.isBlinking = false; }, 130);
-      }
-      scheduleBlink();
-    }, 3500 + Math.random() * 5000);
-  }
-  scheduleBlink();
-
-  /* ── CLICK → MAGIC RIPPLE ───────────────────────────────── */
-  hitEl.addEventListener('click', () => {
-    triggerMagicRipple();
-    if (state.phase === 'sleeping') {
-      state.phase   = 'wandering';
-      state.emotion = 'happy';
-      scheduleSleep();
-    }
-  });
-
-  /* ── WAKE ON SCROLL / CLICK ─────────────────────────────── */
-  function wakeUp() {
-    if (state.phase === 'sleeping') {
-      state.phase   = 'wandering';
-      state.emotion = 'happy';
-      clearTimeout(state.sleepTimer);
-      scheduleSleep();
-    }
-  }
-  window.addEventListener('scroll', wakeUp, { passive: true });
-  document.addEventListener('click', wakeUp);
-
-  /* ── INITIAL GREETING ───────────────────────────────────── */
-  setTimeout(() => {
-    if (!state.hasGreeted) {
-      state.hasGreeted = true;
-      showBubble("Psst! I'm Maya~ Click me for magic! ✨");
-      hideBubble(3800);
-    }
+    if (!S.greeted) { S.greeted = true; say("Psst! I'm Maya~ Click me for magic ✨", 3500); }
   }, 1500);
+  setTimeout(startVisit, 6000);
 
-  /* ── MAIN LOOP ──────────────────────────────────────────── */
-  let t = 0;
-  function loop() {
+  /* ---------- main loop ---------- */
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(50, now - last);
+    last = now;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    t++;
 
-    // Trail spawn (page coords stored, drawn as viewport)
-    if (state.phase !== 'sleeping') {
-      const sp = Math.sqrt(state.vx * state.vx + state.vy * state.vy);
-      if (sp > 0.6) {
-        state.trailPoints.push({ x: state.x, y: state.y, life: 1, size: 3.5 + sp * 0.5 });
-        if (Math.random() > 0.55) spawnDust(
-          state.x + (Math.random() - 0.5) * 7,
-          state.y + (Math.random() - 0.5) * 7, null, 1
-        );
-      }
+    brain(dt, now);
+    maybeVisit(now);
+
+    // sparkle trail while moving
+    if (S.mode !== 'nap' && Math.hypot(S.vx, S.vy) > 0.7) {
+      S.trail.push({ x: S.x, y: S.y, life: 1, size: 2.5 + Math.hypot(S.vx, S.vy) * 0.4 });
+      if (Math.random() > 0.6) burstDust(S.x + rand(-5, 5), S.y + rand(-5, 5), 1);
     }
 
-    // Age trail & dust
-    state.trailPoints    = state.trailPoints.map(p => ({ ...p, life: p.life - 0.03 })).filter(p => p.life > 0);
-    state.dustParticles  = state.dustParticles.map(d => ({
-      ...d,
-      x: d.x + d.vx,
-      y: d.y + d.vy,
-      vy: d.vy - 0.05,
-      life: d.life - 0.022
-    })).filter(d => d.life > 0);
+    // keep her on the page
+    const m = 50;
+    S.x = Math.max(m, Math.min(pageW() - m, S.x));
+    S.y = Math.max(m, Math.min(pageH() - m, S.y));
 
-    // Movement (page space)
-    if      (state.phase === 'wandering')   doWander();
-    else if (state.phase === 'approaching') moveToTarget();
-    else if (state.phase === 'leaving')     moveToTarget();
-    else if (state.phase === 'sleeping') {
-      state.targetX = state.x + Math.sin(t * 0.01) * 0.3;
-      state.targetY = state.y + Math.cos(t * 0.007) * 0.3;
-    } else if (state.phase === 'talking') {
-      state.x += Math.sin(t * 0.03) * 0.3;
-      state.y += Math.cos(t * 0.025) * 0.25;
-    }
+    const vx = S.x - sX(), vy = S.y - sY();
+    hit.style.left = vx + 'px';
+    hit.style.top = vy + 'px';
 
-    // Convert fairy's page coords → viewport coords for hit el & bubble
-    const vx = toViewX(state.x);
-    const vy = toViewY(state.y);
-
-    // Update hit element position (viewport)
-    hitEl.style.left = vx + 'px';
-    hitEl.style.top  = vy + 'px';
-
-    // Update bubble position
-    if (state.chatVisible) updateBubblePos();
-
-    // Draw (translate page → canvas/viewport space inside draw calls)
     drawRipples();
-    drawTrail();
-    drawDust();
-    drawFairy(vx, vy, t);
+    drawParticles();
+    drawFairy(vx, vy, now);
+    bubbleTick(now, vx, vy);
 
     requestAnimationFrame(loop);
   }
-
-  loop();
-
+  requestAnimationFrame(loop);
 })();
